@@ -1,31 +1,23 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
+using System.Windows;
+using System.Collections.Generic;
 using VMS.TPS.Common.Model.API;
 using VMS.TPS.Common.Model.Types;
-
-namespace AverageHU_ESAPI
+using VMS.TPS.Common.Model;
+namespace VMS.TPS
 {
-    class Program
+    public class Script
     {
-        [STAThread]
-        static void Main(string[] args)
+        public Script()
         {
-            var ariaUsername = "username";
-            var ariaPassword = "password";
-            var app = Application.CreateApplication(ariaUsername, ariaPassword);
-
-            //The id of the patient
-            var patientId = "12345";
-            //Open patient context
-            var patient = app.OpenPatientById(patientId);
-
+        }
+        public void Execute(ScriptContext context /*, System.Windows.Window window*/)
+        {
             //Get correct structure set... In our case structure set is named "PSOAS"
-            var ss = patient.StructureSets
-                .FirstOrDefault(s => s.Structures.Any(st => st.Id.Equals("PSOAS", StringComparison.InvariantCultureIgnoreCase)));
-
+            var ss = context.Patient.StructureSets
+            .FirstOrDefault(s => s.Structures.Any(st => st.Id.Equals("PSOAS", StringComparison.InvariantCultureIgnoreCase)));
             //Find the structure named "L5_MID"
             var l5mid = ss.Structures.FirstOrDefault(s => s.Id.Equals("L5_MID", StringComparison.InvariantCultureIgnoreCase));
             double avg = double.NaN;
@@ -36,23 +28,17 @@ namespace AverageHU_ESAPI
                 //If all slices have a NaN value, then there is no contour
                 if (!l5midContours.Any(p => !double.IsNaN(p.Value) && p.Value > 0))
                 {
-                    Console.WriteLine("L5 Mid not found");
+                    MessageBox.Show("L5 Mid not found");
                 }
                 else
                 {
                     //Assumption is L5 contour is only on one slice, find the first slice with a valid area
                     var z = l5midContours.First(p => !double.IsNaN(p.Value) && p.Value > 0).Key;
                     avg = GetSliceHUAvg(ss.Image, z, l5mid);
+                    MessageBox.Show(string.Format("L5_MID Stats :\nArea: {0} cm^2\nHUavg = {1} HU", l5midContours[z].ToString("F2"), avg.ToString("F2")));
                 }
             }
-
-            //Dispose application context
-            app.Dispose();
-
-            //Write results
-            Console.WriteLine(string.Format("L5MID avg HU = {0}", avg));
         }
-
         /// <summary>
         /// Creates a map of slice position z to area of the structure on that slice. Used for finding the correct slice to sample
         /// </summary>
@@ -66,7 +52,6 @@ namespace AverageHU_ESAPI
             }
             return slices;
         }
-
         /// <summary>
         /// Calculates the slice area inside of a contour definition for a given slice Z
         /// </summary>
@@ -96,19 +81,16 @@ namespace AverageHU_ESAPI
             }
             return area;
         }
-
         /// <summary>
         /// For a given slice, and structure this will return the average hounsfield unit inside the contour
         /// </summary>
         private static double GetSliceHUAvg(Image image, int sliceZ, Structure structr)
         {
-            var area = double.NaN;
             var contour = structr.GetContoursOnImagePlane(sliceZ);
             if (contour.Count() > 0)
             {
-                var inside = 0;
                 int[,] buffer = new int[image.XSize, image.YSize];
-                List<int> hus = new List<int>();
+                List<double> hus = new List<double>();
                 image.GetVoxels(sliceZ, buffer);
                 for (int x = 0; x < image.XSize; x++)
                 {
@@ -119,16 +101,14 @@ namespace AverageHU_ESAPI
                         var dz = (sliceZ * image.ZRes * image.ZDirection + image.Origin).z;
                         if (structr.IsPointInsideSegment(new VVector(dx, dy, dz)))
                         {
-                            var hu = buffer[x, y];
-                            hus.Add(hu);
+                            var voxel = buffer[x, y];
+                            hus.Add(image.VoxelToDisplayValue(voxel));
                         }
                     }
                 }
-                var vxArea = image.XRes / 10 * image.YRes / 10;
-                var contourArea = inside * vxArea;
-                area = contourArea;
+                return hus.Average();
             }
-            return area;
+            return double.NaN;
         }
     }
 }
